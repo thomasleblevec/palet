@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UBI · Obtenir mon badge (Phantom)</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--fg:#e5e7eb;--accent:#22c55e}
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Ubuntu,Helvetica,Arial,sans-serif;background:linear-gradient(135deg,#0b1024,#0e1a3a)}
+    .wrap{max-width:680px;margin:0 auto;padding:32px;color:var(--fg)}
+    .card{background:rgba(17,24,39,.7);backdrop-filter:blur(8px);border:1px solid rgba(148,163,184,.2);border-radius:16px;padding:24px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+    h1{margin:0 0 8px;font-size:28px} p{color:var(--muted);line-height:1.5}
+    .row{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+    button{appearance:none;border:1px solid rgba(229,231,235,.2);background:#111827;color:#e5e7eb;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer}
+    button.primary{background:var(--accent);color:#082b12;border-color:transparent}
+    button[disabled]{opacity:.5;cursor:not-allowed}
+    code,kbd{background:#0b1220;border:1px solid rgba(148,163,184,.25);color:#e5e7eb;padding:2px 6px;border-radius:6px}
+    .muted{color:var(--muted)} .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    .status{margin-top:12px;padding:10px 12px;border-radius:12px;background:#0b1220;border:1px solid rgba(148,163,184,.25);color:#cbd5e1;min-height:44px;white-space:pre-wrap}
+    .footer{margin-top:18px;font-size:12px;color:#94a3b8}
+    a{color:#93c5fd}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>UBI · Phantom</h1>
+      <p>Connecte ton wallet <strong>Phantom</strong>, signe une preuve, puis demande ton <strong>badge SBT</strong>. Ensuite, tu recevras automatiquement <strong>1 jeton UBI / jour</strong> dans ce wallet.</p>
+
+      <div class="row">
+        <button id="btnConnect">Connecter Phantom</button>
+        <button id="btnSign" disabled>Signer la preuve</button>
+        <button id="btnMint" class="primary" disabled>Obtenir mon badge</button>
+      </div>
+
+      <div class="muted mono" id="who">Adresse : —</div>
+      <div class="muted mono" id="sig">Signature : —</div>
+      <div class="status" id="status">Prêt.</div>
+
+      <div class="footer">
+        <p>Conseil : pour les tests, utilise <code>Solana Devnet</code>. Sur mobile, ouvre cette page dans le <em>navigateur intégré</em> de l’app Phantom.</p>
+        <p class="muted">Si Phantom n’est pas détecté, installe-le : <a href="https://phantom.app/" target="_blank" rel="noreferrer">phantom.app</a></p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ⚙️ À personnaliser — mets ici l'URL de ton API serveur qui minte le SBT
+    const API_MINT_ENDPOINT = "https://example.com/api/mint"; // ← remplace par ton endpoint
+
+    const $ = (id) => document.getElementById(id);
+    const status = (t) => { $("status").textContent = t };
+
+    const getPhantom = () => (window.solana && window.solana.isPhantom ? window.solana : null);
+    let pubkey = null; let signatureB58 = null;
+
+    // Petit encodeur base58 (pour afficher la signature joliment)
+    const base58 = (bytes) => {
+      const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+      let x = 0n; for (const b of bytes) x = (x << 8n) + BigInt(b);
+      const base = 58n; if (x === 0n) return "1";
+      let out = ""; while (x > 0n){ const m = x % base; out = ALPHABET[Number(m)] + out; x = x / base }
+      let lead = 0; for (const b of bytes){ if (b === 0) lead++; else break }
+      return "1".repeat(lead) + out;
+    };
+
+    async function connect() {
+      try {
+        const ph = getPhantom();
+        if (!ph) { status("Phantom non détecté. Installe l'extension ou ouvre dans l'app Phantom."); return }
+        const res = await ph.connect();
+        pubkey = res.publicKey?.toString?.() || null;
+        $("who").textContent = `Adresse : ${pubkey || '—'}`;
+        $("btnSign").disabled = !pubkey;
+        status("Connecté à Phantom.");
+      } catch (e) {
+        status(e?.message || "Échec de la connexion");
+      }
+    }
+
+    async function signProof() {
+      try {
+        if (!pubkey) { status("Connecte d'abord ton wallet."); return }
+        const ph = getPhantom();
+        const msg = new TextEncoder().encode(`Je demande mon badge SBT pour l'UBI. Adresse: ${pubkey}. Horodatage: ${new Date().toISOString()}`);
+        const { signature } = await ph.signMessage(msg, "utf8");
+        signatureB58 = base58(signature);
+        $("sig").textContent = `Signature : ${signatureB58.slice(0, 32)}…`;
+        $("btnMint").disabled = false;
+        status("Message signé. Prêt pour l'obtention du badge.");
+      } catch (e) {
+        status(e?.message || "Échec de la signature");
+      }
+    }
+
+    async function requestBadge() {
+      try {
+        if (!pubkey || !signatureB58) { status("Signature requise avant la demande de badge."); return }
+        status("Envoi de la demande de badge…");
+        const resp = await fetch(API_MINT_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: pubkey, signature: signatureB58 })
+        });
+        if (!resp.ok) throw new Error(`API mint a échoué: ${resp.status}`);
+        const data = await resp.json().catch(()=>({message:"Badge demandé."}));
+        status(data.message || "Badge demandé. Tu le verras dans Phantom d'ici peu.");
+      } catch (e) {
+        status(e?.message || "Erreur lors de la demande de badge");
+      }
+    }
+
+    $("btnConnect").addEventListener("click", connect);
+    $("btnSign").addEventListener("click", signProof);
+    $("btnMint").addEventListener("click", requestBadge);
+
+    // Auto-détection au chargement
+    if (!getPhantom()) status("Phantom non détecté. Installe l'extension ou ouvre dans l'app Phantom.");
+  </script>
+</body>
+</html>
